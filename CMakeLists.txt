@@ -27,5 +27,8 @@ target_link_libraries(02_aos_soa_transform PRIVATE tinytensor)
 add_executable(03_async_pipeline examples/03_async_pipeline.cpp)
 target_link_libraries(03_async_pipeline PRIVATE tinytensor)
 
+add_executable(04_stride_check examples/04_stride_check.cpp)
+target_link_libraries(04_stride_check PRIVATE tinytensor)
+
 # 可执行输出目录
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
