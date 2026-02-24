@@ -4,6 +4,7 @@
 #include <vector>
 #include <atomic>
 #include <thread>
+#include <future>
 
 // 简易异步：把 copy+compute+copy 三步用线程池并联
 
@@ -24,18 +25,33 @@ int main() {
     tt::ThreadPool pool(4);
     std::atomic<bool> done{ false };
 
+    // 创建信号量
+    // 创建一个 promise (生产者承诺会发出的信号)
+    std::promise<void> p1;
+    // 获取关联的 future (消费者未来会收到的信号)
+    // 注意：std::function 要求 lambda 可拷贝，标准 future 只能移动，
+    // 所以用 shared_future 会省去很多编译报错的麻烦
+    std::shared_future<void> f1 = p1.get_future();
+
+    std::promise<void> p2;
+	std::shared_future<void> f2 = p2.get_future();
+
     pool.enqueue([&] {
         //std::this_thread::sleep_for(std::chrono::seconds(1));
         x.copy_from(host_in.data(), x.bytes());
+		p1.set_value(); // 发出信号：copy 完成
         });
     pool.enqueue([&] {
+		f1.wait(); // 等待信号：copy 完成
         // "compute"：在 x 上做简单计算，写入 y（当作 kernel）
         float* xd = x.data();
         float* yd = y.data();
         size_t n = x.bytes() / sizeof(float);
         for (size_t i = 0; i < n; ++i) yd[i] = xd[i] * 2.0f + 1.0f;
+		p2.set_value(); // 发出信号：compute 完成
         });
     pool.enqueue([&] {
+		f2.wait(); // 等待信号：compute 完成
         y.copy_to(host_out.data(), y.bytes());
         done = true;
         });
