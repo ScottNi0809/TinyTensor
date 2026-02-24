@@ -6,6 +6,7 @@
 #include <cstring>
 #include "status.hpp"
 #include "aligned_alloc.hpp"
+#include "thread_pool.hpp"
 
 namespace tt {
 
@@ -38,6 +39,8 @@ namespace tt {
         const Shape& shape() const { return shape_; }
         Layout layout() const { return layout_; }
         std::size_t stride(std::size_t dim) const { return strides_[dim]; }
+
+        static void ParallelAdd(tt::ThreadPool& pool, const tt::Tensor& A, const tt::Tensor& B, tt::Tensor& C);
 
     private:
         AlignedBuffer buf_{};

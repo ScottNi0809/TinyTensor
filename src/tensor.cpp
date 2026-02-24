@@ -1,6 +1,10 @@
 ﻿#include "tinytensor/tensor.hpp"
+#include "tinytensor/thread_pool.hpp" // 需要包含 ThreadPool 的定义
+#include <thread> // for std::this_thread::yield
+#include <vector>
+#include <algorithm> // for std::min
 #include <numeric>
-#include <algorithm>
+#include <atomic>
 
 namespace tt {
 
@@ -68,6 +72,63 @@ namespace tt {
             return Result::Error(Status::CopyFailed, "copy_to overflow");
         std::memcpy(dst, static_cast<const char*>(buf_.data()) + offset, bytes);
         return Result::OK();
+    }
+
+    // 挑战三：实现真正的 ParallelAdd
+    // 注意：这个函数最好是静态成员函数或者是自由函数，因为它操作三个 Tensor
+    void Tensor::ParallelAdd(tt::ThreadPool& pool, const tt::Tensor& A, const tt::Tensor& B, tt::Tensor& C) {
+        // 1. 简单校验
+        if (A.bytes() != B.bytes() || A.bytes() != C.bytes()) {
+            // 在产生环境应该返回 Error，这里简化处理直接 return
+            return; 
+        }
+
+        // 1. 拿到原始指针（为了性能，不要在循环里调 .data()）
+        const float* a_ptr = A.data();
+        const float* b_ptr = B.data();
+        float* c_ptr = C.data();
+        size_t total = A.bytes() / sizeof(float);
+
+        // 2. 决定切几块 (根据你是 pool(4) 还是 pool(8))
+        // 简单的办法是硬编码 4，或者给 ThreadPool 加一个 .size() 接口
+        int num_threads = 4; // 假设你知道大小
+        size_t chunk = (total + num_threads - 1) / num_threads;
+
+        // 3. 计数器同步
+        // 注意：atomic 不能被拷贝，必须按引用捕获([&])，或者放在堆上用 shared_ptr 管理
+        // 因为 lambda 是按值捕获上下文的 ([=])，如果不小心可能导致问题。
+        // 但这里 finished_count 在栈上，且主线程会阻塞等待，所以按引用捕获是安全的。
+        std::atomic<int> finished_count{ 0 };
+
+        int tasks_launched = 0;
+        for (int i = 0; i < num_threads; ++i) {
+            size_t start = i * chunk;
+            size_t end = std::min(start + chunk, total);
+
+            if (start >= end) break; // 任务太少，后面的线程没活干
+
+            tasks_launched++;
+
+            // 4. 提交任务
+            // 关键修正：Lambda 捕获列表
+            // [=] 会按值捕获所有外部变量（包括 pointers, start, end），这是我们要的（因为 i 变了，start 变了）
+            // [&finished_count] 特别指定 finished_count 按引用捕获（因为我们要修改它，且它是 atomic 不可拷贝）
+            pool.enqueue([=, &finished_count] { 
+                for (size_t k = start; k < end; ++k) {
+                    c_ptr[k] = a_ptr[k] + b_ptr[k]; // 核心计算：C = A + B
+                }
+
+                // 报告完工
+                finished_count++;
+            });
+        }
+
+        // 5. 主线程等待所有分块完成
+        // 修正逻辑：只等待实际启动的任务数，而不是 num_threads
+        // (比如 total=100, threads=400, chunk=1, 则只启动了 100 个任务)
+        while (finished_count < tasks_launched) {
+            std::this_thread::yield(); 
+        }
     }
 
 } // namespace tt
