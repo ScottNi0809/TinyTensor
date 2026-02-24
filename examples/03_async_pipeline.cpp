@@ -25,7 +25,7 @@ int main() {
     std::atomic<bool> done{ false };
 
     pool.enqueue([&] {
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        //std::this_thread::sleep_for(std::chrono::seconds(1));
         x.copy_from(host_in.data(), x.bytes());
         });
     pool.enqueue([&] {
